@@ -1,0 +1,36 @@
+{
+  "name": "herdr-worktree-dispatcher",
+  "version": "0.2.0",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "herdr-worktree-dispatcher": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "init": "npm run build && node dist/cli.js init --skip-build --force-command",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "prepack": "npm run build"
+  },
+  "files": [
+    "dist/",
+    "examples/config.env",
+    "scripts/dispatch.sh",
+    "scripts/install.sh",
+    "skills/worktree-dispatcher/SKILL.md",
+    "skills/worktree-dispatcher/scripts/dispatch.sh",
+    "herdr-plugin.toml",
+    "README.md"
+  ],
+  "dependencies": {
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.1",
+    "typescript": "^5.5.4"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

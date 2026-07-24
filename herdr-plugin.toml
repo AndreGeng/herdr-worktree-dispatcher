@@ -1,0 +1,13 @@
+id = "worktree.dispatcher"
+name = "Worktree Dispatcher"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+description = "Dispatch coding tasks into temporary git worktrees."
+platforms = ["linux", "macos"]
+
+[[actions]]
+id = "dispatch"
+title = "Dispatch Task To Worktree"
+description = "Create a linked git worktree and start an agent with a task prompt."
+contexts = ["workspace"]
+command = ["bash", "scripts/dispatch.sh"]
