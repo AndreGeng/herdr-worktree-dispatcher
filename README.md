@@ -126,6 +126,14 @@ herdr plugin action list --plugin worktree.dispatcher
 
 The init command builds this checkout, links it as the `worktree.dispatcher` Herdr plugin, creates `$(herdr plugin config-dir worktree.dispatcher)/config.env` from `examples/config.env` if it does not already exist, symlinks the companion `worktree-dispatcher` skill into detected local agent skill directories, and installs shortcut commands where the target agent supports them.
 
+Install the repository's publication-safety hooks once per clone:
+
+```bash
+npm run hooks:install
+```
+
+The installer copies a trusted scanner snapshot into `.git`, so checking out an untrusted branch cannot replace the code that receives the private denylist. The pre-commit hook scans staged content. The pre-push hook scans all reachable history and runs Gitleaks when it is installed. See [Open-Source Hygiene](docs/open-source-hygiene.md) for denylist setup and CI requirements.
+
 Useful install variants:
 
 ```bash

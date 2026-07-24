@@ -1,0 +1,12 @@
+#!/bin/bash
+set -e
+
+hook_dir="$(cd "$(dirname "$0")" && pwd -P)"
+scanner="$hook_dir/../check-public-hygiene.mjs"
+
+if [ ! -f "$scanner" ]; then
+  printf 'error: trusted hygiene scanner is missing; run npm run hooks:install again\n' >&2
+  exit 1
+fi
+
+node "$scanner" --staged

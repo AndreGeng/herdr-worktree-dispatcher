@@ -1,0 +1,19 @@
+#!/bin/bash
+set -e
+
+repo_root="$(git rev-parse --show-toplevel)"
+hook_dir="$(cd "$(dirname "$0")" && pwd -P)"
+scanner="$hook_dir/../check-public-hygiene.mjs"
+
+if [ ! -f "$scanner" ]; then
+  printf 'error: trusted hygiene scanner is missing; run npm run hooks:install again\n' >&2
+  exit 1
+fi
+
+node "$scanner" --history
+
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks git "$repo_root" --redact
+else
+  printf 'warning: gitleaks is not installed; CI will run the full secret scan\n' >&2
+fi

@@ -1,5 +1,12 @@
 .DS_Store
+.env
+.env.*
+.open-source-denylist.local
+*.key
 *.log
+*.p12
+*.pem
+*.pfx
 tmp/
 node_modules/
 dist/

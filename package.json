@@ -1,7 +1,22 @@
 {
   "name": "herdr-worktree-dispatcher",
   "version": "0.2.0",
+  "description": "Dispatch coding tasks into temporary Git worktrees through Herdr.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AndreGeng/herdr-worktree-dispatcher.git"
+  },
+  "bugs": {
+    "url": "https://github.com/AndreGeng/herdr-worktree-dispatcher/issues"
+  },
+  "homepage": "https://github.com/AndreGeng/herdr-worktree-dispatcher#readme",
+  "keywords": [
+    "agent",
+    "git",
+    "herdr",
+    "worktree"
+  ],
   "type": "module",
   "bin": {
     "herdr-worktree-dispatcher": "dist/cli.js"
@@ -9,14 +24,25 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
+    "hooks:install": "bash scripts/install-git-hooks.sh",
+    "hygiene": "node scripts/check-public-hygiene.mjs --tracked",
+    "hygiene:history": "node scripts/check-public-hygiene.mjs --history",
+    "hygiene:release": "node scripts/check-public-hygiene.mjs --history --require-denylist",
+    "hygiene:staged": "node scripts/check-public-hygiene.mjs --staged",
     "init": "npm run build && node dist/cli.js init --skip-build --force-command",
     "test": "npm run build && node --test test/*.test.mjs",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run release:check",
+    "release:check": "npm run hygiene:release && npm run check && npm test && npm audit --audit-level=high"
   },
   "files": [
     "dist/",
+    ".githooks/",
+    "docs/open-source-hygiene.md",
     "examples/config.env",
     "scripts/dispatch.sh",
+    "scripts/check-public-hygiene.mjs",
+    "scripts/install-git-hooks.sh",
     "scripts/install.sh",
     "skills/worktree-dispatcher/SKILL.md",
     "skills/worktree-dispatcher/scripts/dispatch.sh",
