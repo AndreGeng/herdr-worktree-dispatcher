@@ -1,0 +1,250 @@
+{
+  "name": "v1",
+  "version": "1.0.0",
+  "description": "Initial evaluation suite for solo vs team comparison",
+  "defaults": {
+    "wall_seconds": 1800,
+    "repetitions": 3,
+    "agent": "opencode",
+    "agent_args": ["--model", "opencode/mimo-v2.5-free"],
+    "team_profile": "eval",
+    "team_leader_agent": "opencode",
+    "team_leader_args": ["--model", "opencode/mimo-v2.5-free"],
+    "team_worker_agent": "codex",
+    "team_worker_args": ["--model", "opencode/mimo-v2.5-free"]
+  },
+  "tasks": [
+    {
+      "id": "fix-slugify-overflow",
+      "name": "Fix slugify truncation",
+      "category": "bug-fix",
+      "difficulty": "easy",
+      "fixture": {},
+      "prompt": "The slugify() function in src/utils/text.ts truncates to 48 characters, but some labels are still too long. Change the maximum length to 64 characters and update the related test in test/text.test.mjs to verify the new limit.",
+      "acceptance": [
+        "slugify() allows up to 64 characters",
+        "test/text.test.mjs passes",
+        "no other functions are changed"
+      ],
+      "graders": [
+        { "type": "command", "command": "node --test test/text.test.mjs", "label": "text tests pass" },
+        { "type": "file-exists", "path": "src/utils/text.ts", "label": "source file exists" }
+      ],
+      "critical": false
+    },
+    {
+      "id": "add-team-state-cleanup",
+      "name": "Add team state cleanup function",
+      "category": "feature",
+      "difficulty": "medium",
+      "fixture": {},
+      "prompt": "Add a new function `cleanupTeamState(path: string): void` to src/team/state.ts that removes the team state JSON file if it exists. Export it from the module. Write a test for it in test/teamState.test.mjs that verifies the file is removed after calling cleanupTeamState.",
+      "acceptance": [
+        "cleanupTeamState is exported from src/team/state.ts",
+        "function removes the file at the given path",
+        "test/teamState.test.mjs contains a test for cleanupTeamState",
+        "existing tests still pass"
+      ],
+      "graders": [
+        { "type": "command", "command": "node --test test/teamState.test.mjs", "label": "team state tests pass" },
+        { "type": "command", "command": "grep -q 'cleanupTeamState' src/team/state.ts", "label": "cleanupTeamState exported" }
+      ],
+      "critical": true
+    },
+    {
+      "id": "fix-random-agent-determinism",
+      "name": "Fix random agent selection",
+      "category": "bug-fix",
+      "difficulty": "easy",
+      "fixture": {},
+      "prompt": "The randomAgent() function in src/team/profiles.ts uses Math.random() which is not deterministic. Add an optional seed parameter so that tests can produce reproducible results. Do not change the public behavior when no seed is provided. Write a test in test/teamProfiles.test.mjs that verifies seeded selection is deterministic.",
+      "acceptance": [
+        "randomAgent accepts an optional seed parameter",
+        "existing behavior is preserved when seed is not provided",
+        "test/teamProfiles.test.mjs contains a determinism test",
+        "existing tests still pass"
+      ],
+      "graders": [
+        { "type": "command", "command": "node --test test/teamProfiles.test.mjs", "label": "team profiles tests pass" },
+        { "type": "command", "command": "grep -q 'seed' src/team/profiles.ts", "label": "seed parameter exists" }
+      ],
+      "critical": false
+    },
+    {
+      "id": "add-diff-scope-grader",
+      "name": "Add diff scope grader",
+      "category": "feature",
+      "difficulty": "medium",
+      "fixture": {},
+      "prompt": "Add a new grader type `diff-scope` to the eval system. It should accept a list of allowed path glob patterns and verify that the agent's diff only touches files matching those patterns. Implement it in src/eval/graders.ts and add a corresponding type to src/eval/types.ts. Write a unit test in test/eval.test.mjs.",
+      "acceptance": [
+        "EvalGraderDiffScope type exists in src/eval/types.ts",
+        "grader checks diff paths against allowed patterns",
+        "test/eval.test.mjs contains a test for diff-scope grader",
+        "existing tests still pass"
+      ],
+      "graders": [
+        { "type": "command", "command": "node --test test/eval.test.mjs", "label": "eval tests pass" },
+        { "type": "command", "command": "grep -q 'diff-scope' src/eval/types.ts", "label": "diff-scope type defined" }
+      ],
+      "critical": false
+    },
+    {
+      "id": "add-eval-validate-command",
+      "name": "Add eval validate command",
+      "category": "feature",
+      "difficulty": "medium",
+      "fixture": {},
+      "prompt": "Add a `validate` subcommand to the eval CLI that checks whether a suite file is well-formed. It should verify all tasks have required fields (id, prompt, fixture, graders) and report any validation errors. Implement it in src/commands/eval.ts. Write a test in test/eval.test.mjs that validates a known good suite and catches a malformed one.",
+      "acceptance": [
+        "herdr-worktree-dispatcher eval validate --suite v1 runs without error",
+        "malformed suite files produce descriptive error messages",
+        "test/eval.test.mjs contains validation tests",
+        "existing tests still pass"
+      ],
+      "graders": [
+        { "type": "command", "command": "node --test test/eval.test.mjs", "label": "eval tests pass" },
+        { "type": "command", "command": "grep -q 'validate' src/commands/eval.ts", "label": "validate command exists" }
+      ],
+      "critical": false
+    },
+    {
+      "id": "fix-parse-exit-code",
+      "name": "Fix parseExitCode edge case",
+      "category": "bug-fix",
+      "difficulty": "easy",
+      "fixture": {},
+      "prompt": "The parseExitCode function in src/commands/team.ts should handle the edge case where an empty string is passed as the exit code. Currently it may return NaN. Fix it to return undefined for empty strings and write a regression test in test/teamCommands.test.mjs.",
+      "acceptance": [
+        "parseExitCode('') returns undefined",
+        "parseExitCode('0') returns 0",
+        "parseExitCode('1') returns 1",
+        "test/teamCommands.test.mjs contains the regression test",
+        "existing tests still pass"
+      ],
+      "graders": [
+        { "type": "command", "command": "node --test test/teamCommands.test.mjs", "label": "team commands tests pass" }
+      ],
+      "critical": true
+    },
+    {
+      "id": "add-trace-aggregation",
+      "name": "Add full run trace aggregation",
+      "category": "feature",
+      "difficulty": "hard",
+      "fixture": {},
+      "prompt": "Add a function `loadRunRecords(runId: string): TraceRecord[]` to src/trace/stats.ts that scans all agent trace files under the run directory (traceRoot()/runs/<runId>/agents/*.jsonl) and returns merged records. This enables proper team trace aggregation. Write a test in test/trace.test.mjs that creates mock trace files for multiple agents and verifies they are all loaded.",
+      "acceptance": [
+        "loadRunRecords is exported from src/trace/stats.ts",
+        "function reads all .jsonl files in the run's agents directory",
+        "records from all agents are merged and deduplicated",
+        "test/trace.test.mjs contains a multi-agent aggregation test",
+        "existing tests still pass"
+      ],
+      "graders": [
+        { "type": "command", "command": "node --test test/trace.test.mjs", "label": "trace tests pass" },
+        { "type": "command", "command": "grep -q 'loadRunRecords' src/trace/stats.ts", "label": "loadRunRecords exported" }
+      ],
+      "critical": true
+    },
+    {
+      "id": "add-report-cost-metrics",
+      "name": "Add cost metrics to report",
+      "category": "refactor",
+      "difficulty": "easy",
+      "fixture": {},
+      "prompt": "Extend the eval report in src/eval/report.ts to include a cost-efficiency section showing cost per successful task for each arm (total wall time / pass count). Also add a section showing the top 3 slowest tasks. Write a test in test/eval.test.mjs that verifies the report output contains these sections.",
+      "acceptance": [
+        "report includes cost per successful task for solo and team",
+        "report includes top 3 slowest tasks section",
+        "test/eval.test.mjs contains report format tests",
+        "existing tests still pass"
+      ],
+      "graders": [
+        { "type": "command", "command": "node --test test/eval.test.mjs", "label": "eval tests pass" }
+      ],
+      "critical": false
+    },
+    {
+      "id": "add-batch-retry",
+      "name": "Add batch task retry with backoff",
+      "category": "feature",
+      "difficulty": "hard",
+      "fixture": {},
+      "prompt": "Add retry functionality to the batch system. When a batch task fails during dispatch, it should be automatically retried up to 3 times with exponential backoff (1s, 2s, 4s). Implement this in src/batch/manager.ts. Add a `retry_count` field to BatchTask in src/batch/types.ts. Track retry attempts and final status. Write tests in test/batchManager.test.mjs that verify retry logic, backoff timing, and max retry limit.",
+      "acceptance": [
+        "BatchTask has a retry_count field",
+        "Failed tasks are retried up to 3 times",
+        "Backoff timing follows exponential pattern (1s, 2s, 4s)",
+        "test/batchManager.test.mjs contains retry tests",
+        "existing tests still pass"
+      ],
+      "graders": [
+        { "type": "command", "command": "node --test test/batchManager.test.mjs", "label": "batch manager tests pass" },
+        { "type": "command", "command": "grep -q 'retry_count' src/batch/types.ts", "label": "retry_count field exists" }
+      ],
+      "critical": false
+    },
+    {
+      "id": "add-connector-health",
+      "name": "Add connector health check",
+      "category": "feature",
+      "difficulty": "hard",
+      "fixture": {},
+      "prompt": "Add a health check system for connectors. Create a new file src/connectors/health.ts with a `checkConnectorHealth(connectorType: string): Promise<HealthStatus>` function. It should verify the connector is installed, can be imported, and responds within 5 seconds. Integrate this into src/connectors/registry.ts. Write tests in test/connectorRegistry.test.mjs that verify health checks for valid and invalid connectors.",
+      "acceptance": [
+        "src/connectors/health.ts exists with checkConnectorHealth function",
+        "HealthStatus type includes status, latency, and error fields",
+        "Registry integrates health check on connector resolution",
+        "test/connectorRegistry.test.mjs contains health check tests",
+        "existing tests still pass"
+      ],
+      "graders": [
+        { "type": "command", "command": "node --test test/connectorRegistry.test.mjs", "label": "connector registry tests pass" },
+        { "type": "command", "command": "grep -q 'checkConnectorHealth' src/connectors/health.ts", "label": "health check function exists" }
+      ],
+      "critical": false
+    },
+    {
+      "id": "add-trace-export",
+      "name": "Add trace export to JSON and CSV",
+      "category": "feature",
+      "difficulty": "hard",
+      "fixture": {},
+      "prompt": "Add trace export functionality. Create src/trace/export.ts with functions `exportTraceToJSON(runId: string, outputPath: string)` and `exportTraceToCSV(runId: string, outputPath: string)`. JSON export should include all trace records with metadata. CSV export should flatten the data for spreadsheet analysis. Write tests in test/trace.test.mjs that verify both export formats produce valid output files.",
+      "acceptance": [
+        "src/trace/export.ts exists with exportTraceToJSON and exportTraceToCSV",
+        "JSON export includes run metadata and all trace records",
+        "CSV export has proper headers and flattened data",
+        "test/trace.test.mjs contains export tests",
+        "existing tests still pass"
+      ],
+      "graders": [
+        { "type": "command", "command": "node --test test/trace.test.mjs", "label": "trace tests pass" },
+        { "type": "command", "command": "grep -q 'exportTraceToJSON' src/trace/export.ts", "label": "export function exists" }
+      ],
+      "critical": false
+    },
+    {
+      "id": "add-config-validator",
+      "name": "Add config validation with detailed errors",
+      "category": "feature",
+      "difficulty": "hard",
+      "fixture": {},
+      "prompt": "Add comprehensive config validation. Create src/config/validator.ts with a `validateConfig(configPath: string): ValidationResult` function. It should check all supported keys, validate types, detect unknown keys, and provide line-number-specific error messages. Integrate into src/config/config.ts so invalid configs fail fast with clear errors. Write tests in a new test/configValidator.test.mjs that verify validation of valid configs, unknown keys, type errors, and missing required fields.",
+      "acceptance": [
+        "src/config/validator.ts exists with validateConfig function",
+        "ValidationResult includes errors with line numbers",
+        "Unknown keys are detected and reported",
+        "Type mismatches are detected (e.g., string where boolean expected)",
+        "test/configValidator.test.mjs contains validation tests",
+        "existing tests still pass"
+      ],
+      "graders": [
+        { "type": "command", "command": "node --test test/configValidator.test.mjs", "label": "config validator tests pass" },
+        { "type": "command", "command": "grep -q 'validateConfig' src/config/validator.ts", "label": "validateConfig function exists" }
+      ],
+      "critical": false
+    }
+  ]
+}

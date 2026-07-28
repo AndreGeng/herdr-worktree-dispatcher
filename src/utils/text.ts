@@ -8,7 +8,7 @@ export function slugify(value: string): string {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .replace(/-+/g, '-');
-  return (slug || 'task').slice(0, 48);
+  return (slug || 'task').slice(0, 64);
 }
 
 export function labelFromTask(value: string): string {

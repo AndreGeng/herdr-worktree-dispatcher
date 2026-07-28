@@ -1,4 +1,37 @@
+import { readdirSync, readFileSync, type Dirent } from 'node:fs';
+import { join } from 'node:path';
+
+import { readTraceRecords } from './parsers.js';
+import { traceRoot } from './paths.js';
 import type { AgentStats, ToolCallRecord, TraceRecord, TraceStatsSummary } from './types.js';
+
+export function loadRunRecords(runId: string): TraceRecord[] {
+  const agentsDir = join(traceRoot(), 'runs', runId, 'agents');
+  let files: Dirent[];
+  try {
+    files = readdirSync(agentsDir, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
+
+  const records = files
+    .filter((file) => file.isFile() && file.name.endsWith('.jsonl'))
+    .flatMap((file) => readTraceRecords(join(agentsDir, file.name)));
+  const deduplicated = new Map<string, TraceRecord>();
+  for (const record of records) {
+    let key: string;
+    if (record.type === 'tool_call') {
+      key = `tool_call:${record.agent_run_id}:${record.tool_call_id}`;
+    } else if (record.type === 'session_ref') {
+      key = `session_ref:${record.agent_run_id}:${record.session_id || ''}:${record.session_path || ''}`;
+    } else {
+      key = `${record.type}:${record.agent_run_id}:${record.timestamp}`;
+    }
+    if (!deduplicated.has(key)) deduplicated.set(key, record);
+  }
+  return Array.from(deduplicated.values());
+}
 
 export function buildStats(records: TraceRecord[]): TraceStatsSummary {
   const toolCalls = dedupeToolCalls(records.filter((record): record is ToolCallRecord => record.type === 'tool_call'));

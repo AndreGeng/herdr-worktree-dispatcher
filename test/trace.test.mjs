@@ -5,9 +5,9 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 
 import { findLatestPiSessionForWorktree } from '../dist/trace/piSessions.js';
-import { createTraceIdentity } from '../dist/trace/paths.js';
+import { createTraceIdentity, traceRoot } from '../dist/trace/paths.js';
 import { parseCodexSession, parseJsonl, parsePiSession } from '../dist/trace/parsers.js';
-import { buildStats } from '../dist/trace/stats.js';
+import { buildStats, loadRunRecords } from '../dist/trace/stats.js';
 
 const identity = {
   run_id: 'run_1',
@@ -199,5 +199,79 @@ test('team worker trace identity can force a fresh agent run id', () => {
     else process.env.HERDR_TRACE_TEAM_ID = previousTeam;
     if (previousAgent === undefined) delete process.env.HERDR_TRACE_AGENT_RUN_ID;
     else process.env.HERDR_TRACE_AGENT_RUN_ID = previousAgent;
+  }
+});
+
+test('loads trace records from multiple agents in a run', () => {
+  const previousTmpdir = process.env.TMPDIR;
+  const root = mkdtempSync(join(tmpdir(), 'herdr-trace-test-'));
+  process.env.TMPDIR = root;
+  try {
+    const agentsDir = join(traceRoot(), 'runs', 'test_run_1', 'agents');
+    mkdirSync(agentsDir, { recursive: true });
+    writeFileSync(join(agentsDir, 'agent_leader.jsonl'), `${JSON.stringify({
+      type: 'tool_call',
+      run_id: 'test_run_1',
+      agent_run_id: 'leader_1',
+      agent_role: 'leader',
+      agent_kind: 'claude',
+      agent_name: 'leader',
+      tool_call_id: 'call_1',
+      tool_name: 'bash',
+      started_at: '2026-07-02T00:00:00.000Z',
+      timing_source: 'hook',
+    })}\n`);
+    writeFileSync(join(agentsDir, 'agent_worker.jsonl'), `${JSON.stringify({
+      type: 'tool_call',
+      run_id: 'test_run_1',
+      agent_run_id: 'worker_1',
+      agent_role: 'worker',
+      agent_kind: 'pi',
+      agent_name: 'worker',
+      tool_call_id: 'call_2',
+      tool_name: 'read',
+      started_at: '2026-07-02T00:00:01.000Z',
+      timing_source: 'session_exact',
+    })}\n`);
+
+    const records = loadRunRecords('test_run_1');
+
+    assert.equal(records.length, 2);
+    assert.ok(records.some((record) => record.agent_run_id === 'leader_1' && record.type === 'tool_call' && record.tool_name === 'bash'));
+    assert.ok(records.some((record) => record.agent_run_id === 'worker_1' && record.type === 'tool_call' && record.tool_name === 'read'));
+  } finally {
+    if (previousTmpdir === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = previousTmpdir;
+  }
+});
+
+test('deduplicates matching tool calls loaded from multiple trace files', () => {
+  const previousTmpdir = process.env.TMPDIR;
+  const root = mkdtempSync(join(tmpdir(), 'herdr-trace-test-'));
+  process.env.TMPDIR = root;
+  try {
+    const agentsDir = join(traceRoot(), 'runs', 'test_run_1', 'agents');
+    mkdirSync(agentsDir, { recursive: true });
+    const record = {
+      type: 'tool_call',
+      run_id: 'test_run_1',
+      agent_run_id: 'leader_1',
+      agent_role: 'leader',
+      agent_kind: 'claude',
+      agent_name: 'leader',
+      tool_call_id: 'call_1',
+      tool_name: 'bash',
+      started_at: '2026-07-02T00:00:00.000Z',
+      timing_source: 'hook',
+    };
+    writeFileSync(join(agentsDir, 'agent_leader.jsonl'), `${JSON.stringify(record)}\n`);
+    writeFileSync(join(agentsDir, 'agent_worker.jsonl'), `${JSON.stringify(record)}\n`);
+
+    const records = loadRunRecords('test_run_1');
+
+    assert.equal(records.length, 1);
+  } finally {
+    if (previousTmpdir === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = previousTmpdir;
   }
 });

@@ -13,6 +13,7 @@ import { registerStats } from './commands/stats.js';
 import { registerSource } from './commands/source.js';
 import { registerTeam } from './commands/team.js';
 import { registerTraceHook } from './commands/traceHook.js';
+import { registerEval } from './commands/eval.js';
 import { CliError } from './utils/errors.js';
 
 const program = new Command();
@@ -32,6 +33,7 @@ registerInstall(program);
 registerMerge(program);
 registerMessage(program);
 registerStats(program);
+registerEval(program);
 registerTeam(program);
 registerTraceHook(program);
 registerCleanupWorker(program);
