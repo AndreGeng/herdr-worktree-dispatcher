@@ -120,6 +120,12 @@ export interface EvalQualityMetrics {
   acceptance_matched: number;
   acceptance_total: number;
   quality_score: number;
+  scoring_details?: Array<{
+    category: string;
+    points: number;
+    max_points: number;
+    reason: string;
+  }>;
 }
 
 export interface EvalTaskComparison {
