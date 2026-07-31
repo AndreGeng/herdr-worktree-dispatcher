@@ -400,7 +400,8 @@ function buildAgentArgs(agentCmd: string, extraArgs: string[], prompt: string, p
     return { command: 'timeout', args: [String(timeoutSecs), 'opencode', ...opencodeArgs] };
   }
   if (command === 'claude') {
-    return { command, args: [...baseArgs, '-p', prompt, '--output-format', 'text', '--no-session-persistence', '--dangerously-skip-permissions', ...extraArgs] };
+    const claudeArgs = [...baseArgs, '-p', prompt, '--output-format', 'text', '--no-session-persistence', '--dangerously-skip-permissions', ...extraArgs];
+    return { command: 'timeout', args: [String(timeoutSecs), 'claude', ...claudeArgs] };
   }
   if (command === 'codex') {
     return { command, args: [...baseArgs, 'exec', '--dangerously-bypass-approvals-and-sandbox', prompt, ...extraArgs] };
@@ -427,19 +428,7 @@ ${task.prompt}
 }
 
 function buildTeamEvalPrompt(task: EvalTask, config: EvalRunConfig): string {
-  const workerAgent = config.team_worker_agent || 'codex';
-  let prompt = `You are the leader agent in a team evaluation. Your role is to coordinate with worker agents to complete the task.
-
-Your worker agent is: ${workerAgent}
-
-Team coordination rules:
-1. Analyze the task and break it into clear subtasks
-2. For each implementation subtask, spawn a worker agent using:
-   exec ${workerAgent} exec --dangerously-bypass-approvals-and-sandbox "<subtask prompt>"
-3. Review the worker's output and verify correctness
-4. If the worker's changes need adjustment, spawn another worker with corrected instructions
-5. Once all subtasks are complete, run the verification tests yourself
-6. Commit the final changes
+  let prompt = `You are the leader agent in a team evaluation. Your role is to complete the task with high quality.
 
 Task:
 ${task.prompt}
@@ -447,7 +436,13 @@ ${task.prompt}
   if (task.acceptance?.length) {
     prompt += `\nAcceptance criteria:\n${task.acceptance.map((a) => `- ${a}`).join('\n')}\n`;
   }
-  prompt += `\nWork together with your worker agent to complete this task efficiently. The worker handles implementation while you handle coordination and quality assurance.\n`;
+  prompt += `\nComplete this task directly. Focus on quality, correctness, and writing tests.
+When done, you MUST commit your changes by running these commands:
+
+git add -A
+git commit -m "feat: complete task"
+
+Do not skip the commit step. Do not wait for user input. Just run the commands above.\n`;
   return prompt;
 }
 

@@ -8,8 +8,8 @@
     "agent": "opencode",
     "agent_args": ["--model", "opencode/mimo-v2.5-free"],
     "team_profile": "eval",
-    "team_leader_agent": "opencode",
-    "team_leader_args": ["--model", "opencode/mimo-v2.5-free"],
+    "team_leader_agent": "claude",
+    "team_leader_args": [],
     "team_worker_agent": "codex",
     "team_worker_args": ["--model", "opencode/mimo-v2.5-free"]
   },
