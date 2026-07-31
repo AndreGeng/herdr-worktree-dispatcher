@@ -13,6 +13,16 @@ import { analyzeQuality } from '../eval/quality.js';
 import type { EvalGradeResult, EvalRunConfig, EvalRunResult, EvalArm, EvalTask, EvalGraderDef } from '../eval/types.js';
 import { loadEvalSuite, resolveEvalSuitePath, validateEvalSuite } from '../eval/suite.js';
 
+export function evalGitEnvironment(environment: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return {
+    ...environment,
+    GIT_AUTHOR_NAME: 'eval',
+    GIT_AUTHOR_EMAIL: 'eval@users.noreply.github.com',
+    GIT_COMMITTER_NAME: 'eval',
+    GIT_COMMITTER_EMAIL: 'eval@users.noreply.github.com',
+  };
+}
+
 interface EvalRunOptions {
   suite?: string;
   tasks?: string[];
@@ -254,7 +264,7 @@ function executeSolo(
       cwd: cloneDir,
       timeout: wallMs,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, GIT_AUTHOR_NAME: 'eval', GIT_AUTHOR_EMAIL: 'eval@test', GIT_COMMITTER_NAME: 'eval', GIT_COMMITTER_EMAIL: 'eval@test' },
+      env: evalGitEnvironment(),
     });
   } catch (error: unknown) {
     const elapsed = Date.now() - startTime;
@@ -293,14 +303,7 @@ function executeTeam(
       cwd: cloneDir,
       timeout: wallMs,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        EVAL_WORKER_AGENT: config.team_worker_agent || 'codex',
-        GIT_AUTHOR_NAME: 'eval',
-        GIT_AUTHOR_EMAIL: 'eval@test',
-        GIT_COMMITTER_NAME: 'eval',
-        GIT_COMMITTER_EMAIL: 'eval@test',
-      },
+      env: evalGitEnvironment({ ...process.env, EVAL_WORKER_AGENT: config.team_worker_agent || 'codex' }),
     });
   } catch (error: unknown) {
     const elapsed = Date.now() - startTime;
@@ -350,7 +353,7 @@ function finalizeRun(
         execFileSync('git', ['add', '-A'], { cwd: cloneDir, stdio: ['pipe', 'pipe', 'pipe'] });
         execFileSync('git', ['commit', '-m', 'eval: automated task completion'], {
           cwd: cloneDir,
-          env: { ...process.env, GIT_AUTHOR_NAME: 'eval', GIT_AUTHOR_EMAIL: 'eval@test', GIT_COMMITTER_NAME: 'eval', GIT_COMMITTER_EMAIL: 'eval@test' },
+          env: evalGitEnvironment(),
           stdio: ['pipe', 'pipe', 'pipe'],
         });
         merged = true;

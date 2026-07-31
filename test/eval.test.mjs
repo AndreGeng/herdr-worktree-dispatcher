@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import { buildComparison } from '../dist/eval/comparison.js';
 import { buildReport } from '../dist/eval/report.js';
 import { evaluateGate } from '../dist/eval/gate.js';
+import { evalGitEnvironment } from '../dist/commands/eval.js';
 
 function makeGrade(taskId, arm, rep, passed) {
   return {
@@ -32,6 +33,14 @@ function makeRun(taskId, arm, rep, wallMs, merged) {
     artifact_dir: '/tmp/test',
   };
 }
+
+test('eval commits use a public noreply identity', () => {
+  const environment = evalGitEnvironment({ PATH: '/usr/bin' });
+
+  assert.equal(environment.GIT_AUTHOR_EMAIL, 'eval@users.noreply.github.com');
+  assert.equal(environment.GIT_COMMITTER_EMAIL, 'eval@users.noreply.github.com');
+  assert.equal(environment.PATH, '/usr/bin');
+});
 
 test('comparison computes overall pass rates and deltas', () => {
   const results = [
