@@ -29,6 +29,7 @@ export interface MergeToken {
   agent_session_path?: string;
   batch_dir?: string;
   batch_task_id?: string;
+  team_state_file?: string;
 }
 
 export function createTokenPath(label: string): string {

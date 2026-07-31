@@ -62,11 +62,22 @@ export function runCleanupWorker(options: CleanupOptions): void {
       log(logFile, `prompt cleanup failed: ${(error as Error).message}`);
     }
   }
+  removeEphemeralFile(token.team_state_file, 'team state', logFile);
   try {
     rmSync(tokenPath);
     log(logFile, 'cleanup complete; removed token');
   } catch (error) {
     log(logFile, `token cleanup failed: ${(error as Error).message}`);
+  }
+}
+
+function removeEphemeralFile(path: string | undefined, label: string, logFile: string): void {
+  if (!path || !existsSync(path)) return;
+  try {
+    rmSync(path);
+    log(logFile, `removed ${label} file`);
+  } catch (error) {
+    log(logFile, `${label} cleanup failed: ${(error as Error).message}`);
   }
 }
 

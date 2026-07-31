@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
 
 import { getConfigSection, getMergedConfigSection, resolveConfigFiles } from '../config/config.js';
 import { die } from '../utils/errors.js';
@@ -10,6 +11,7 @@ const BUILTIN_ENGINEERING: TeamProfile = {
   leaderAgent: 'opencode',
   defaultWorkerAgent: 'pi',
   workerAgentPool: ['claude', 'codex'],
+  forwardEnv: [],
   maxActiveWorkers: 1,
   workerAgents: {},
   roles: [
@@ -66,25 +68,41 @@ export function resolveTeamName(explicit: string | boolean | undefined, herdrBin
 }
 
 export function loadTeamProfile(input: { teamName: string; herdrBin: string; configFile?: string; projectConfigFile?: string; profile?: string; leaderAgent?: string }): TeamProfile {
-  const files = resolveConfigFiles({ herdrBin: input.herdrBin, configFile: input.configFile });
-  if (input.projectConfigFile && !input.configFile) files.projectConfigFile = input.projectConfigFile;
+  const files = input.configFile || input.projectConfigFile
+    ? { userConfigFile: input.configFile, projectConfigFile: input.projectConfigFile }
+    : resolveConfigFiles({ herdrBin: input.herdrBin });
   const defaultSection = getMergedConfigSection(files, 'default');
   const profileSection = input.profile ? getMergedConfigSection(files, `profile.${input.profile}`) : {};
   const teamSection = getMergedConfigSection(files, `team.${input.teamName}`);
   const builtin = input.teamName === 'engineering' ? BUILTIN_ENGINEERING : emptyProfile(input.teamName);
-  const roleSections = getTeamRoleSections(files, input.teamName);
+  const userRoleSections = getTeamRoleSections({ userConfigFile: files.userConfigFile }, input.teamName);
+  const projectRoleSections = getTeamRoleSections({ projectConfigFile: files.projectConfigFile }, input.teamName);
+  scopeProjectPromptFiles(projectRoleSections, files.projectConfigFile);
+  const roleSections = mergeRoleSections(userRoleSections, projectRoleSections);
   const finalRoles = parseList(teamSection.roles) || [...new Set([...builtin.roles.map((role) => role.role), ...roleSections.keys()])];
   const disabled = new Set(parseList(teamSection.disabled_roles) || []);
-  const workerAgents = { ...builtin.workerAgents, ...parseWorkers(teamSection.workers) };
+  const trustedTeamSection = files.userConfigFile ? getConfigSection(files.userConfigFile, `team.${input.teamName}`) : {};
+  const forwardEnv = parseForwardEnv(trustedTeamSection.forward_env);
+  const trustedDefaultSection = files.userConfigFile ? getConfigSection(files.userConfigFile, 'default') : {};
+  const trustedProfileSection = files.userConfigFile && input.profile ? getConfigSection(files.userConfigFile, `profile.${input.profile}`) : {};
+  const runtimeTeamSection = forwardEnv.length > 0 ? trustedTeamSection : teamSection;
+  const runtimeDefaultSection = forwardEnv.length > 0 ? trustedDefaultSection : defaultSection;
+  const runtimeProfileSection = forwardEnv.length > 0 ? trustedProfileSection : profileSection;
+  const workerAgents = { ...builtin.workerAgents, ...parseWorkers(runtimeTeamSection.workers) };
   const roles = finalRoles
     .filter((role) => !disabled.has(role))
-    .map((role) => mergeRole(builtin.roles.find((item) => item.role === role), role, roleSections.get(role)));
+    .map((role) => {
+      const builtinRole = builtin.roles.find((item) => item.role === role);
+      const merged = mergeRole(builtinRole, role, roleSections.get(role));
+      return forwardEnv.length > 0 ? useTrustedRoleAgent(merged, builtinRole, userRoleSections.get(role)) : merged;
+    });
   if (roles.length === 0) die(`team profile has no roles: ${input.teamName}`);
   return {
     name: input.teamName,
-    leaderAgent: input.leaderAgent || teamSection.leader_agent || profileSection.agent || defaultSection.agent || builtin.leaderAgent,
-    defaultWorkerAgent: teamSection.worker_agent || builtin.defaultWorkerAgent,
-    workerAgentPool: parseList(teamSection.worker_agent_pool) || builtin.workerAgentPool,
+    leaderAgent: input.leaderAgent || runtimeTeamSection.leader_agent || runtimeProfileSection.agent || runtimeDefaultSection.agent || builtin.leaderAgent,
+    defaultWorkerAgent: runtimeTeamSection.worker_agent || builtin.defaultWorkerAgent,
+    workerAgentPool: parseList(runtimeTeamSection.worker_agent_pool) || builtin.workerAgentPool,
+    forwardEnv,
     maxActiveWorkers: parsePositiveInt(teamSection.max_active_workers) || builtin.maxActiveWorkers,
     workerAgents,
     roles,
@@ -107,7 +125,7 @@ export function resolveWorkerAgent(profile: TeamProfile, role: string, explicitA
 }
 
 function emptyProfile(name: string): TeamProfile {
-  return { name, leaderAgent: 'opencode', defaultWorkerAgent: 'pi', workerAgentPool: ['claude', 'codex'], maxActiveWorkers: 1, workerAgents: {}, roles: [] };
+  return { name, leaderAgent: 'opencode', defaultWorkerAgent: 'pi', workerAgentPool: ['claude', 'codex'], forwardEnv: [], maxActiveWorkers: 1, workerAgents: {}, roles: [] };
 }
 
 function randomAgent(pool: string[] | undefined): string | undefined {
@@ -130,6 +148,14 @@ function mergeRole(builtin: TeamRole | undefined, role: string, override: Record
   return merged;
 }
 
+function useTrustedRoleAgent(role: TeamRole, builtin: TeamRole | undefined, trustedOverride: Record<string, string> | undefined): TeamRole {
+  const trustedAgent = trustedOverride?.agent || builtin?.agent;
+  const result = { ...role };
+  if (trustedAgent) result.agent = trustedAgent;
+  else delete result.agent;
+  return result;
+}
+
 function getTeamRoleSections(files: { userConfigFile?: string; projectConfigFile?: string }, teamName: string): Map<string, Record<string, string>> {
   const roles = new Map<string, Record<string, string>>();
   for (const configFile of [files.userConfigFile, files.projectConfigFile].filter((file): file is string => Boolean(file))) {
@@ -139,6 +165,33 @@ function getTeamRoleSections(files: { userConfigFile?: string; projectConfigFile
     }
   }
   return roles;
+}
+
+function mergeRoleSections(...sources: Array<Map<string, Record<string, string>>>): Map<string, Record<string, string>> {
+  const result = new Map<string, Record<string, string>>();
+  for (const source of sources) {
+    for (const [role, values] of source) result.set(role, { ...(result.get(role) || {}), ...values });
+  }
+  return result;
+}
+
+function scopeProjectPromptFiles(sections: Map<string, Record<string, string>>, configFile: string | undefined): void {
+  if (!configFile) return;
+  const projectRoot = dirname(dirname(configFile));
+  for (const values of sections.values()) {
+    const promptFile = values.prompt_file;
+    if (!promptFile) continue;
+    if (isAbsolute(promptFile)) die('project role prompt_file must stay inside the project root');
+    const candidate = resolve(projectRoot, promptFile);
+    const lexicalRelative = relative(projectRoot, candidate);
+    if (lexicalRelative.startsWith('..') || isAbsolute(lexicalRelative)) die('project role prompt_file must stay inside the project root');
+    if (!existsSync(candidate)) die(`prompt_file not found: ${candidate}`);
+    const realRoot = realpathSync(projectRoot);
+    const realCandidate = realpathSync(candidate);
+    const realRelative = relative(realRoot, realCandidate);
+    if (realRelative.startsWith('..') || isAbsolute(realRelative)) die('project role prompt_file must stay inside the project root');
+    values.prompt_file = realCandidate;
+  }
 }
 
 function parseWorkers(value: string | undefined): Record<string, string> {
@@ -154,6 +207,14 @@ function parseWorkers(value: string | undefined): Record<string, string> {
 function parseList(value: string | undefined): string[] | undefined {
   if (!value) return undefined;
   return value.split(',').map((item) => item.trim()).filter(Boolean);
+}
+
+function parseForwardEnv(value: string | undefined): string[] {
+  const names = parseList(value) || [];
+  for (const name of names) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) die(`invalid forwarded environment variable name: ${name}`);
+  }
+  return [...new Set(names)];
 }
 
 function parsePositiveInt(value: string | undefined): number | undefined {

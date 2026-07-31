@@ -10,6 +10,7 @@ import { isWorktreeDirty } from '../git/git.js';
 import { agentSend, closePane, findRootPaneId, getAgentPaneId, runInPane, sendToPane, splitPane } from '../herdr/client.js';
 import { writeWorktreePromptFile, writeWorktreeRunScript } from '../prompt/addPrompt.js';
 import { buildWorkerPrompt } from '../prompt/teamPrompt.js';
+import { formatTeamEnvironmentPrefix, removeTeamEnvironmentFile, resolveForwardedEnvironment, teamEnvironmentPath, writeTeamEnvironmentFile } from '../team/environment.js';
 import { loadTeamProfile, resolveWorkerAgent } from '../team/profiles.js';
 import { addRunningWorker, listTeamEvents, markWorkerDone, markWorkerFailed, readTeamState, recordLeaderNotification, recordWorkerChecklistUpdate, recordWorkerFinish, recordWorkerPlan, writeTeamState } from '../team/state.js';
 import type { TeamEvent, TeamMember } from '../team/types.js';
@@ -147,6 +148,7 @@ export function runTeamSpawn(taskParts: string[], options: TeamSpawnOptions): vo
   const profile = loadTeamProfile({ teamName: state.profile, herdrBin: state.herdr_bin, configFile: state.config_file, projectConfigFile: state.project_config_file, profile: state.config_profile });
   const roleConfig = profile.roles.find((item) => item.role === role);
   if (!roleConfig) die(`unknown team role: ${role}`);
+  if (state.forward_env?.length && options.agent) die('team spawn --agent is disabled when forward_env is configured');
   const agentCommand = resolveWorkerAgent(profile, role, options.agent);
   const taskText = readText(taskParts, 'worker task text is required');
   const workerId = `worker_${slugify(role)}_${Date.now().toString(36)}`;
@@ -157,7 +159,10 @@ export function runTeamSpawn(taskParts: string[], options: TeamSpawnOptions): vo
   const language = state.language ?? resolveLanguage({ userConfigFile: state.config_file, projectConfigFile: state.project_config_file }, state.config_profile);
   const prompt = buildWorkerPrompt({ role: roleConfig, taskText, teamTokenPath: tokenPath, workerId, sharedWorktreePath: state.shared_worktree_path, language, mergeCommand: state.merge_command || `${shellQuote(dispatchScriptPath(import.meta.url))} merge --token ${shellQuote(state.merge_token_path)}` });
   writeFileSync(promptPath, prompt);
-  const runner = buildAgentRunCommand({ agentCommand, cwd: state.shared_worktree_path, promptPath, traceEnv: traceEnv(trace, state.merge_token_path, role), shellExec: false });
+  const environmentValues = resolveForwardedEnvironment(state.forward_env || []);
+  const environmentFile = state.forward_env?.length ? teamEnvironmentPath(`${state.team_id}-${workerId}`) : undefined;
+  const workerTraceEnv = `${formatTeamEnvironmentPrefix(environmentFile)}${traceEnv(trace, state.merge_token_path, role)}`;
+  const runner = buildAgentRunCommand({ agentCommand, cwd: state.shared_worktree_path, promptPath, traceEnv: workerTraceEnv, shellExec: false });
   const logFile = `${state.shared_worktree_path}/.herdr-worktree-dispatcher/runs/${slugify(`${workerId}-output`)}.log`;
   const worker: TeamMember = {
     member_id: workerId,
@@ -178,21 +183,32 @@ export function runTeamSpawn(taskParts: string[], options: TeamSpawnOptions): vo
   };
   let nextState = addRunningWorker(state, worker);
   writeLatestTraceIndex({ ...trace, token_path: state.merge_token_path, worktree_path: state.shared_worktree_path, branch: state.branch, source_cwd: state.source_cwd, worker_role: role });
-  if (runner.needsPanePrompt) {
-    writeTeamState(tokenPath, nextState);
-    const agentResponse = startInteractiveWorker({ herdrBin: state.herdr_bin, agentCommand, agentName, workspaceId: state.shared_workspace_id, cwd: state.shared_worktree_path, leaderPaneId: state.leader.pane_id, split: state.layout, promptPath, prompt, traceEnv: traceEnv(trace, state.merge_token_path, role) });
-    nextState = {
-      ...nextState,
-      workers: nextState.workers.map((item) => item.member_id === workerId ? { ...item, pane_id: agentResponse.paneId } : item),
-    };
-    writeTeamState(tokenPath, nextState);
-  } else {
-    const agentResponse = startSplitWorker({ herdrBin: state.herdr_bin, agentName, workspaceId: state.shared_workspace_id, cwd: state.shared_worktree_path, leaderPaneId: state.leader.pane_id, split: state.layout, command: runner.command, teamTokenPath: tokenPath, workerId, scriptPath: dispatchScriptPath(import.meta.url), workerLabel: `${role}(${trace.agent_kind})`, taskText, logFile });
-    nextState = {
-      ...nextState,
-      workers: nextState.workers.map((item) => item.member_id === workerId ? { ...item, pane_id: agentResponse.paneId } : item),
-    };
-    writeTeamState(tokenPath, nextState);
+  if (environmentFile) writeTeamEnvironmentFile(environmentFile, environmentValues);
+  try {
+    if (runner.needsPanePrompt) {
+      writeTeamState(tokenPath, nextState);
+      const agentResponse = startInteractiveWorker({ herdrBin: state.herdr_bin, agentCommand, agentName, workspaceId: state.shared_workspace_id, cwd: state.shared_worktree_path, leaderPaneId: state.leader.pane_id, split: state.layout, promptPath, prompt, traceEnv: workerTraceEnv });
+      nextState = {
+        ...nextState,
+        workers: nextState.workers.map((item) => item.member_id === workerId ? { ...item, pane_id: agentResponse.paneId } : item),
+      };
+      writeTeamState(tokenPath, nextState);
+    } else {
+      const agentResponse = startSplitWorker({ herdrBin: state.herdr_bin, agentName, workspaceId: state.shared_workspace_id, cwd: state.shared_worktree_path, leaderPaneId: state.leader.pane_id, split: state.layout, command: runner.command, teamTokenPath: tokenPath, workerId, scriptPath: dispatchScriptPath(import.meta.url), workerLabel: `${role}(${trace.agent_kind})`, taskText, logFile });
+      nextState = {
+        ...nextState,
+        workers: nextState.workers.map((item) => item.member_id === workerId ? { ...item, pane_id: agentResponse.paneId } : item),
+      };
+      writeTeamState(tokenPath, nextState);
+    }
+  } catch (error) {
+    removeTeamEnvironmentFile(environmentFile);
+    try {
+      writeTeamState(tokenPath, markWorkerFailed(nextState, workerId));
+    } catch {
+      // Preserve the original launch failure if state rollback also fails.
+    }
+    throw error;
   }
   const dispatched = nextState.workers.find((item) => item.member_id === workerId) || worker;
   const output = { status: 'worker_dispatched', team_id: state.team_id, worker_id: workerId, role, agent: agentCommand, agent_name: agentName, launch_mode: dispatched.launch_mode, tab_id: dispatched.tab_id, pane_id: dispatched.pane_id, pid: dispatched.pid, log_file: dispatched.log_file, prompt_file: promptPath, trace_file: trace.trace_file };
@@ -333,12 +349,17 @@ function startInteractiveWorker(input: { herdrBin: string; agentCommand: string;
   const runner = buildAgentRunCommand({ agentCommand: input.agentCommand, cwd: input.cwd, promptPath: input.promptPath, traceEnv: input.traceEnv, forceInteractive: true });
   const leaderPaneId = input.leaderPaneId || findRootPaneId(input.herdrBin, { workspaceId: input.workspaceId, cwd: input.cwd }) || die('could not resolve leader pane id for interactive worker');
   const pane = splitPane(input.herdrBin, { paneId: leaderPaneId, direction: input.split, cwd: input.cwd, focus: false });
-  const runScript = writeWorktreeRunScript(input.cwd, `${input.agentName}-interactive`, runner.command);
-  runInPane(input.herdrBin, pane.paneId, runScript);
-  const delayMs = Number(process.env.HERDR_WORKTREE_AGENT_SEND_DELAY || '0.3') * 1000;
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
-  sendToPane(input.herdrBin, pane.paneId, input.prompt);
-  return { paneId: pane.paneId };
+  try {
+    const runScript = writeWorktreeRunScript(input.cwd, `${input.agentName}-interactive`, runner.command);
+    runInPane(input.herdrBin, pane.paneId, runScript);
+    const delayMs = Number(process.env.HERDR_WORKTREE_AGENT_SEND_DELAY || '0.3') * 1000;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
+    sendToPane(input.herdrBin, pane.paneId, input.prompt);
+    return { paneId: pane.paneId };
+  } catch (error) {
+    closeWorkerPane(input.herdrBin, pane.paneId);
+    throw error;
+  }
 }
 
 function startSplitWorker(input: { herdrBin: string; agentName: string; workspaceId: string; cwd: string; leaderPaneId?: string; split: 'right' | 'down'; command: string; teamTokenPath: string; workerId: string; scriptPath: string; workerLabel: string; taskText: string; logFile: string }): { paneId?: string } {
@@ -346,9 +367,14 @@ function startSplitWorker(input: { herdrBin: string; agentName: string; workspac
   const command = buildVisibleWorkerCommand({ command: input.command, doneCommand, workerLabel: input.workerLabel, worktreePath: input.cwd, taskText: input.taskText, logFile: input.logFile });
   const leaderPaneId = input.leaderPaneId || findRootPaneId(input.herdrBin, { workspaceId: input.workspaceId, cwd: input.cwd }) || die('could not resolve leader pane id for worker');
   const pane = splitPane(input.herdrBin, { paneId: leaderPaneId, direction: input.split, cwd: input.cwd, focus: false });
-  const runScript = writeWorktreeRunScript(input.cwd, `${input.agentName}-worker`, command);
-  runInPane(input.herdrBin, pane.paneId, runScript);
-  return { paneId: pane.paneId };
+  try {
+    const runScript = writeWorktreeRunScript(input.cwd, `${input.agentName}-worker`, command);
+    runInPane(input.herdrBin, pane.paneId, runScript);
+    return { paneId: pane.paneId };
+  } catch (error) {
+    closeWorkerPane(input.herdrBin, pane.paneId);
+    throw error;
+  }
 }
 
 function closeWorkerPane(herdrBin: string, paneId: string | undefined): boolean {

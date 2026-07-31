@@ -9,6 +9,7 @@ import { buildAgentRunCommand } from '../herdr/agentRunner.js';
 import { createWorktree, findRootPaneId, sendToPane, runInPane } from '../herdr/client.js';
 import { buildAddPrompt, writeWorktreePromptFile, writeWorktreeRunScript } from '../prompt/addPrompt.js';
 import { buildLeaderPrompt } from '../prompt/teamPrompt.js';
+import { formatTeamEnvironmentPrefix, removeTeamEnvironmentFile, resolveForwardedEnvironment, teamEnvironmentPath, writeTeamEnvironmentFile } from '../team/environment.js';
 import { createTeamId, teamStatePath, writeTeamState } from '../team/state.js';
 import { loadTeamProfile, resolveTeamName } from '../team/profiles.js';
 import { createTokenPath, tokenLogPath, writeToken } from '../token/token.js';
@@ -269,12 +270,14 @@ function runTeamAdd(taskParts: string[], options: AddOptions, herdrBin: string, 
   const teamName = resolveTeamName(options.team, herdrBin, options.config, sourceCwd);
   const profile = loadTeamProfile({ teamName, herdrBin, configFile: configFiles.userConfigFile, projectConfigFile: configFiles.projectConfigFile, profile: options.profile, leaderAgent: options.leaderAgent });
   requireCommand(firstCommandToken(profile.leaderAgent));
+  const forwardedEnvironment = resolveForwardedEnvironment(profile.forwardEnv);
   const label = options.name || labelFromTask(taskText);
   const branch = options.branch || `worktree/${slugify(label)}-${branchSuffix()}`;
   const parentWorkspaceId = process.env.HERDR_WORKSPACE_ID || process.env.HERDR_ACTIVE_WORKSPACE_ID || undefined;
   const worktree = createWorktree(herdrBin, { branch, baseCommit, label, parentWorkspaceId, sourceCwd });
   const teamId = createTeamId(label);
   const teamToken = teamStatePath(teamId);
+  const environmentFile = profile.forwardEnv.length > 0 ? teamEnvironmentPath(teamId) : undefined;
   const agentName = `wt-${slugify(label)}-leader`;
   const trace = createTraceIdentity({ agentKind: inferAgentKind(profile.leaderAgent), agentName, agentRole: 'leader', teamId, forceNewAgentRunId: true });
   ensureTraceFile(trace.trace_file);
@@ -303,6 +306,7 @@ function runTeamAdd(taskParts: string[], options: AddOptions, herdrBin: string, 
     agent_kind: trace.agent_kind,
     trace_file: trace.trace_file,
     dispatch_started_at: trace.dispatch_started_at,
+    team_state_file: teamToken,
   });
   writeLatestTraceIndex({ ...trace, token_path: mergeToken, worktree_path: worktree.worktreePath, branch, source_cwd: sourceCwd });
   const prompt = buildLeaderPrompt({ taskText, profile, language: config.language, teamTokenPath: teamToken, sharedWorktreePath: worktree.worktreePath, mergeCommand, cleanupLogFile });
@@ -320,6 +324,7 @@ function runTeamAdd(taskParts: string[], options: AddOptions, herdrBin: string, 
     merge_token_path: mergeToken,
     merge_command: mergeCommand,
     team_token_path: teamToken,
+    forward_env: profile.forwardEnv,
     herdr_bin: herdrBin,
     config_file: configFiles.userConfigFile,
     project_config_file: configFiles.projectConfigFile,
@@ -346,8 +351,15 @@ function runTeamAdd(taskParts: string[], options: AddOptions, herdrBin: string, 
     created_at: trace.dispatch_started_at,
     updated_at: trace.dispatch_started_at,
   };
-  const paneId = startTeamAgent({ herdrBin, agentCommand: profile.leaderAgent, agentArgs: config.agentArgs, agentName, workspaceId: worktree.workspaceId, cwd: worktree.worktreePath, tabId: worktree.tabId, paneId: worktree.paneId, promptPath, prompt, traceEnv: traceEnvPairs(trace, mergeToken, undefined) });
-  writeTeamState(teamToken, { ...state, leader: { ...state.leader, pane_id: paneId } });
+  if (environmentFile) writeTeamEnvironmentFile(environmentFile, forwardedEnvironment);
+  let paneId: string;
+  try {
+    paneId = startTeamAgent({ herdrBin, agentCommand: profile.leaderAgent, agentArgs: config.agentArgs, agentName, workspaceId: worktree.workspaceId, cwd: worktree.worktreePath, tabId: worktree.tabId, paneId: worktree.paneId, promptPath, prompt, traceEnv: `${formatTeamEnvironmentPrefix(environmentFile)}${traceEnvPairs(trace, mergeToken, undefined)}` });
+    writeTeamState(teamToken, { ...state, leader: { ...state.leader, pane_id: paneId } });
+  } catch (error) {
+    removeTeamEnvironmentFile(environmentFile);
+    throw error;
+  }
   process.stdout.write(`${JSON.stringify({ status: 'team_dispatched', team_id: teamId, profile: profile.name, branch, label, workspace_id: worktree.workspaceId, worktree_path: worktree.worktreePath, leader_agent: profile.leaderAgent, leader_agent_name: agentName, pane_id: paneId, team_token: teamToken, merge_token: mergeToken, merge_command: mergeCommand, trace_file: trace.trace_file })}\n`);
 }
 

@@ -21,6 +21,7 @@ export interface TeamProfile {
   leaderAgent: string;
   defaultWorkerAgent?: string;
   workerAgentPool?: string[];
+  forwardEnv: string[];
   maxActiveWorkers: number;
   roles: TeamRole[];
   workerAgents: Record<string, string>;
@@ -107,6 +108,7 @@ export interface TeamState {
   merge_token_path: string;
   merge_command?: string;
   team_token_path: string;
+  forward_env?: string[];
   herdr_bin: string;
   config_file?: string;
   project_config_file?: string;

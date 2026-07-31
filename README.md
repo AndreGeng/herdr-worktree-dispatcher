@@ -327,6 +327,22 @@ merge = true
 
 Supported user-level keys are `agent`, repeated `agent_arg`, `language`, `layout`, `merge`, `merge_mode`, and `team`. `language` defaults to `zh-CN` and controls natural-language summaries and generated human-readable file content in both plain and team dispatches. `merge_mode` defaults to `rebase` and can be set to `merge`. CLI flags such as `--layout` and `--merge-mode` override config values.
 
+Trusted user-level team profiles also support `forward_env`, a comma-separated allowlist of environment variable names. Repository-local config cannot expand this allowlist. The variables must exist in the process that starts the team and remain available to the leader's subprocesses. Their values pass through mode-`0600` one-time files outside the repository; each file is deleted immediately after the target process sources it. The dispatcher does not copy values into prompts, logs, or team state, although the receiving agent can access and potentially print any forwarded value. Example:
+
+```ini
+[team.engineering]
+forward_env = DESIGN_API_TOKEN
+```
+
+For Figma's official remote MCP, do not forward a personal access token. Configure and authenticate Figma once in Codex's user-level MCP configuration instead:
+
+```bash
+codex mcp add figma --url https://mcp.figma.com/mcp
+codex mcp get figma
+```
+
+Codex workers are separate Codex sessions: they load Codex's user configuration, including authenticated MCP servers, but they do not inherit another agent runtime's per-session tool grants or MCP connections.
+
 Repo-local `.herdr-worktree-dispatcher/config.env` also supports `[worktree.preflight]` with `strict`, `prepare_command`, and `verify_command`. Team worker spawn automatically checks git index readiness before opening a worker pane. When `prepare_command` is configured, spawn runs that command in the shared worktree; otherwise package-manager install is inferred only when dependencies are missing. When `strict = true`, missing project preflight commands become blockers instead of warnings.
 
 In team mode, the leader pane is the user-facing coordination surface. The top-level `language` value is shared by the leader and every worker. Worker panes show detailed CI-style execution logs and the dispatcher saves the same output under `.herdr-worktree-dispatcher/runs/`. Workers record structured checklists with `team plan`, phase updates with `team update`, and final results with `team finish`; leaders catch up with `team events`. `team status` is a diagnostic fallback, not the primary progress UI. The final commit and merge are handled by the `shipper` role.

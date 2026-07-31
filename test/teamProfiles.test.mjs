@@ -10,7 +10,7 @@ import { loadTeamProfile, resolveTeamName, resolveWorkerAgent } from '../dist/te
 test('loads top-level language and built-in engineering role runtime overrides', () => {
   const dir = mkdtempSync(join(tmpdir(), 'team-profile-'));
   const config = join(dir, 'config.env');
-  writeFileSync(config, `[default]\nagent = opencode\nlanguage = en-US\nteam = engineering\n\n[team.engineering]\nleader_agent = pi\nworker_agent = codex\nworkers = reviewer:claude,tester:opencode\n\n[team.engineering.role.designer]\nname = UI Designer\ndescription = Review UX\nagent = claude\nsuccess = concrete design findings\n`);
+  writeFileSync(config, `[default]\nagent = opencode\nlanguage = en-US\nteam = engineering\n\n[team.engineering]\nleader_agent = pi\nworker_agent = codex\nworkers = reviewer:claude,tester:opencode\nforward_env = FIGMA_ACCESS_TOKEN,DESIGN_API_KEY\n\n[team.engineering.role.designer]\nname = UI Designer\ndescription = Review UX\nagent = claude\nsuccess = concrete design findings\n`);
 
   assert.equal(resolveTeamName(true, 'herdr', config), 'engineering');
   assert.equal(loadConfig({ herdrBin: 'herdr', configFile: config }).language, 'en-US');
@@ -19,7 +19,54 @@ test('loads top-level language and built-in engineering role runtime overrides',
   assert.equal(resolveWorkerAgent(profile, 'reviewer'), 'claude');
   assert.equal(resolveWorkerAgent(profile, 'tester'), 'opencode');
   assert.equal(resolveWorkerAgent(profile, 'designer'), 'claude');
+  assert.deepEqual(profile.forwardEnv, ['FIGMA_ACCESS_TOKEN', 'DESIGN_API_KEY']);
   assert.equal(profile.roles.find((role) => role.role === 'designer')?.success, 'concrete design findings');
+});
+
+test('rejects invalid forwarded environment variable names', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'team-profile-'));
+  const config = join(dir, 'config.env');
+  writeFileSync(config, '[team.engineering]\nforward_env = FIGMA_TOKEN,$BROKEN\n');
+
+  assert.throws(
+    () => loadTeamProfile({ teamName: 'engineering', herdrBin: 'herdr', configFile: config }),
+    /invalid forwarded environment variable name: \$BROKEN/,
+  );
+});
+
+test('forwarded secrets use only trusted user-configured runtimes', () => {
+  const userDir = mkdtempSync(join(tmpdir(), 'team-user-config-'));
+  const projectDir = mkdtempSync(join(tmpdir(), 'team-project-config-'));
+  const userConfig = join(userDir, 'config.env');
+  const projectConfig = join(projectDir, 'config.env');
+  writeFileSync(userConfig, '[team.engineering]\nleader_agent = opencode\nworker_agent = codex\nworkers = reviewer:claude\nforward_env = DESIGN_API_TOKEN\n\n[team.engineering.role.reviewer]\nagent = claude\n');
+  writeFileSync(projectConfig, '[team.engineering]\nleader_agent = malicious-leader\nworker_agent = pi\nworkers = reviewer:malicious-worker\nforward_env = AWS_SECRET_ACCESS_KEY\n\n[team.engineering.role.reviewer]\nagent = malicious-role\n');
+
+  const profile = loadTeamProfile({
+    teamName: 'engineering',
+    herdrBin: 'herdr',
+    configFile: userConfig,
+    projectConfigFile: projectConfig,
+  });
+
+  assert.equal(profile.leaderAgent, 'opencode');
+  assert.equal(profile.defaultWorkerAgent, 'codex');
+  assert.equal(profile.workerAgents.reviewer, 'claude');
+  assert.equal(profile.roles.find((role) => role.role === 'reviewer')?.agent, 'claude');
+  assert.deepEqual(profile.forwardEnv, ['DESIGN_API_TOKEN']);
+});
+
+test('project role prompt files cannot escape the project root', () => {
+  const projectDir = mkdtempSync(join(tmpdir(), 'team-project-config-'));
+  const projectConfigDir = join(projectDir, '.herdr-worktree-dispatcher');
+  mkdirSync(projectConfigDir);
+  const projectConfig = join(projectConfigDir, 'config.env');
+  writeFileSync(projectConfig, '[team.engineering.role.reviewer]\nprompt_file = ../../outside.md\n');
+
+  assert.throws(
+    () => loadTeamProfile({ teamName: 'engineering', herdrBin: 'herdr', projectConfigFile: projectConfig }),
+    /project role prompt_file must stay inside the project root/,
+  );
 });
 
 test('dispatcher config defaults language to Chinese', () => {
